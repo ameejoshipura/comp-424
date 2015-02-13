@@ -7,6 +7,7 @@
 
 import pdb #Use pdb.set_trace() to make a break in your code.
 import numpy as np
+import Queue
 
 ###################
 # Solve sudoku #
@@ -26,16 +27,18 @@ import numpy as np
 ### 
 
 def reduce(Xi, Xj, csp):
+	#algorithm from the lecture slides
 	revised = False
-	count = 0
+	#for each possible value, d, in the domain of Xi
 	for d in csp.domains[Xi]:
-		for dj in csp.domains[Xj]:
-			if not((d,dj) in csp.constraints[Xj]):
-				count+=1
-		if count==0:
-			csp.domains[Xj].remove(d)
-			revised = True
-    return revised,csp
+		#if the domain of Xj has only one value and 
+		#if that value is the same as the selected value,d, from the domain of Xi
+		#then remove it from the domain of Xi and set reduced to true
+		if len(csp.domains[Xj])==1:
+			if d == csp.domains[Xj][0]:
+				csp.domains[Xi].remove(d)
+				revised = True
+	return revised,csp
 
 
 
@@ -49,43 +52,28 @@ def reduce(Xi, Xj, csp):
 ### 
 
 def AC3(csp):
-	arc = Queue()
-	arc.put((Xi, Xj) for Xi in csp.constraints for Xj in csp.constraints[Xi])
-	while not arc.empty():
-		(Xi, Xj) = arc.get()
-		if reduce(Xi,Xj,csp):
+	#algorithm from the lecture slides
+	#queue 'arcs' of all the arcs in csp
+	arc = csp.arcs()
+	#while the queue is not empty
+	while len(arc)>0:
+		#get the first tuple element of the queue
+		(Xi, Xj) = arc.pop()
+		#check if any revision has occurred in the domain of Xi
+		revised,csp=reduce(Xi,Xj,csp)
+		#if revised and domain of Xi is non empty, then add all other pairs Xk, Xi
+		#where Xk is in the constraints ('neighbors')of Xi
+		#Xk is not Xi, and then repeat the process by checking in the loop
+		#if domain of Xk needs revision
+		if revised:
+			#if after revision, domain of Xi is empty
+			#return false indicating arc inconsistency
 			if not csp.domains[Xi]:
 				return csp,False
-			for Xk in csp.variables:
-				if (Xk not Xi) and (Xk not Xj):
-					if Xk[0]==Xi[0]:
-						arc.put((Xk,Xi))
-					if Xk[1]==Xi[1]:
-						arc.put((Xk,Xi))
-					#column is 0-2, 3-5, 6-8
-					#and row is 0-2, 3-5, 6-8
-					if (Xk[0] in [0,1,2])and(Xi[0] in [0,1,2]):
-						if (Xk[1] in [0,1,2]) and (Xi[1] in [0,1,2]):
-							arc.put((Xk,Xi))
-						else if (Xk[1] in [3,4,5]) and (Xi[1] in [3,4,5]):
-							arc.put((Xk,Xi))
-						else if (Xk[1] in [6,7,8]) and (Xi[1] in [6,7,8]):
-							arc.put((Xk,Xi))
-					else if (Xk[0] in [3,4,5])and(Xi[0] in [3,4,5]):
-						if (Xk[1] in [0,1,2]) and (Xi[1] in [0,1,2]):
-							arc.put((Xk,Xi))
-						else if (Xk[1] in [3,4,5]) and (Xi[1] in [3,4,5]):
-							arc.put((Xk,Xi))
-						else if (Xk[1] in [6,7,8]) and (Xi[1] in [6,7,8]):
-							arc.put((Xk,Xi))
-					else if (Xk[0] in [6,7,8])and(Xi[0] in [6,7,8]):
-						if (Xk[1] in [0,1,2]) and (Xi[1] in [0,1,2]):
-							arc.put((Xk,Xi))
-						else if (Xk[1] in [3,4,5]) and (Xi[1] in [3,4,5]):
-							arc.put((Xk,Xi))
-						else if (Xk[1] in [6,7,8]) and (Xi[1] in [6,7,8]):
-							arc.put((Xk,Xi))
-    return csp,True
+			for Xk in csp.constraints[Xi]:
+				if Xk != Xj:
+					arc.append((Xk,Xi))
+	return csp,True
 
 
 
@@ -105,10 +93,16 @@ def AC3(csp):
 ### 
 
 def is_compatible(X,v, assignment, csp):
-	blockY, blockX = (X//3)*3, (X//3)*3
-	if not(((v,X) in csp.constraints[X]) or ((X,v) in csp.constraints[X]) or (((blockY+i//3, blockX+i%3) in csp.constraints[X])for i in range(9))):
-		return True			
-    return False
+	#if a constraint of X is already in assignments, ie assigned a value
+	#check if that value is same value
+	#if v and assigned value of the constraint are same, return false
+	#because they cannot have the same value
+	for var in assignment:
+		for c in csp.constraints[X]:
+			if var==c:
+				if assignment[var]==v:
+					return False	
+	return True
 
 
 
@@ -125,7 +119,26 @@ def is_compatible(X,v, assignment, csp):
 ### 
 
 def backtrack(assignments, csp):
-    return assignments
+	#check for a value from a domain
+	#check if it is compatible
+	#AC-3 to find inconsistency - remove from domain if inconsistent
+	#if inconsistency found, backtrack
+	#if not, move forward
+	if len(assignments)==len(csp.variables):
+		return assignments
+	v=[v for v in csp.variables if v not in assignments]
+    v=v[0]
+	for d in csp.domains[v]:
+		if is_compatible(v,d,assignments,csp):
+			assignments[v]=d
+			csp2=csp.copy()
+			csp2,isOK=AC3(csp2)
+			if isOK:
+				result=backtrack(assignments,csp2)
+				if result!=False:
+					return result
+			assignments.pop(v)
+	return False
 
 
 
@@ -143,25 +156,6 @@ def backtrack(assignments, csp):
 ### 
 
 def backtracking_search(csp):
-	assignments = {}
-	prevList = {}
-	prev = '' #to remember the previous element
-	notFound = false #boolean is set to true if no assignment is found
-	invalidValue = {}
-	for v in csp.variables:
-		if notFound:
-			v = prev
-			del assignment[v]
-		else:
-			prevList[v] = prev
-		if v in zip(*state.find(' ')):
-			for d in csp.domains[v]:
-				if is_compatible(v,d, assignments, csp) and (d not in invalidValue[v]):
-					assignments[v] = d
-					invalidValue[v] = d
-					notFound = true
-					prev = v
-					break
-		if v not in assignments:
-			notFound = true
-	return backtrack(assignments, csp)
+	#build the assignments as we traverse through all variables
+	#backtrack and assign simultaneously 			
+	return backtrack({}, csp)
